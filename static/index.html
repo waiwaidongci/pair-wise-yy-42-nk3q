@@ -1,1 +1,35 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>山火事件指挥与离线人员调度</title><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#17212b}pre{background:#f4f7f9;padding:1rem;overflow:auto}button{padding:.55rem 1rem}</style></head><body><h1>山火事件指挥与离线人员调度</h1><p>维护火线、风向、资源和任务区，合并离线现场记录并防止人员重复分配</p><p>火线长度、风向变化和离线记录数量影响风险等级；同一资源不能同时出现在多个活动任务中。</p><button onclick="loadItems()">刷新列表</button><pre id="out">使用X-Actor和X-Role请求头调用接口。</pre><script>async function loadItems(){const r=await fetch('/api/items',{headers:{'X-Actor':'demo','X-Role':'viewer'}});document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2)}</script></body></html>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>山火指挥与火线派车调度台</title><style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:1100px;margin:1.5rem auto;padding:0 1rem;color:#17212b}
+h1{font-size:1.4rem}.cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin:1rem 0}
+.card{border:1px solid #d4dde4;border-radius:8px;padding:.8rem;background:#fbfdfe}
+.card h2{font-size:1rem;margin:0 0 .5rem}.wait h2{color:#9a6700}.disp h2{color:#1a7f37}.rear h2{color:#b42318}
+ul{list-style:none;margin:0;padding:0;font-size:.85rem}li{padding:.25rem 0;border-bottom:1px dashed #e3e9ee}
+table{border-collapse:collapse;width:100%;font-size:.85rem;margin-top:.5rem}
+th,td{border:1px solid #e3e9ee;padding:.3rem .5rem;text-align:left}
+button{padding:.5rem 1rem;border-radius:6px;border:1px solid #1a7f37;background:#1a7f37;color:#fff;cursor:pointer}
+.muted{color:#5c6b78;font-size:.85rem}
+</style></head><body>
+<h1>山火指挥与火线派车调度台</h1>
+<p class="muted">车辆 × 火线任务 × 任务区容量绑定；容量满排队，同车同时段唯一有效任务；风向/火线等级变化先释放车辆再 FIFO 重排；断网恢复用 request_id 幂等补传。</p>
+<button onclick="load()">刷新调度台</button>
+<div class="cols">
+  <div class="card wait"><h2>等待派车（FIFO 队列）</h2><ul id="waiting"></ul></div>
+  <div class="card disp"><h2>已派车辆（在途）</h2><ul id="dispatched"></ul></div>
+  <div class="card rear"><h2>失效重排</h2><ul id="rearranged"></ul></div>
+</div>
+<h2>车辆状态</h2><table><thead><tr><th>呼号</th><th>车型</th><th>状态</th></tr></thead><tbody id="vehicles"></tbody></table>
+<h2>最近事件</h2><table><thead><tr><th>时间</th><th>派车单</th><th>事件</th><th>车辆</th><th>调度员</th></tr></thead><tbody id="events"></tbody></table>
+<script>
+const HEAD={'X-Actor':'console','X-Role':'viewer'};
+function esc(s){return String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function row(d){return `#${d.id} 任务#${d.task_id} ${d.vehicle_callsign?('车:'+esc(d.vehicle_callsign)):'(待分车)'} [${d.slot_start.slice(11,16)}-${d.slot_end.slice(11,16)}]${d.requeue_count?(' 重排'+d.requeue_count+'次'):''}`;}
+async function load(){
+  const r=await fetch('/api/board',{headers:HEAD}); const b=await r.json();
+  waiting.innerHTML=b.waiting.map(d=>`<li>${row(d)}</li>`).join('')||'<li class="muted">无</li>';
+  dispatched.innerHTML=b.dispatched.map(d=>`<li>${row(d)}</li>`).join('')||'<li class="muted">无</li>';
+  rearranged.innerHTML=b.invalidated_rearranged.map(d=>`<li>${row(d)} <b>${d.status}</b></li>`).join('')||'<li class="muted">无</li>';
+  vehicles.innerHTML=b.vehicles.map(v=>`<tr><td>${esc(v.callsign)}</td><td>${v.vehicle_type}</td><td>${v.state==='dispatched'?'在途':'空闲'}</td></tr>`).join('');
+  events.innerHTML=b.events.slice(0,30).map(e=>`<tr><td>${e.created_at.slice(11,19)}</td><td>${e.dispatch_id??'-'}</td><td>${e.kind}</td><td>${e.vehicle_id??'-'}</td><td>${esc(e.actor)}</td></tr>`).join('');
+}
+load();
+</script></body></html>

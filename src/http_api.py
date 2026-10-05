@@ -42,6 +42,13 @@ def make_handler(service: Service, static_dir: str):
         def _identity(self) -> Tuple[str, str]:
             return self.headers.get("X-Actor", ""), self.headers.get("X-Role", "")
 
+        @staticmethod
+        def _path_id(path: str, index: int) -> int:
+            try:
+                return int(path.split("/")[index])
+            except (IndexError, ValueError) as exc:
+                raise ValidationError("路径ID必须是整数") from exc
+
         def _body(self) -> Dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0") or 0)
             if length <= 0:
@@ -98,6 +105,28 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path == "/api/vehicles":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"vehicles": service.list_vehicles(role)})
+                elif path == "/api/zones":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"zones": service.list_zones(role)})
+                elif path == "/api/tasks":
+                    actor, role = self._identity()
+                    del actor
+                    query = parse_qs(urlparse(self.path).query)
+                    self._json(200, {"tasks": service.list_tasks(role, query.get("status", [None])[0])})
+                elif path.startswith("/api/tasks/"):
+                    task_id = self._path_id(path, 3)
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, service.get_task(task_id, role))
+                elif path == "/api/board":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, service.board(role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -110,6 +139,30 @@ def make_handler(service: Service, static_dir: str):
                 body = self._body()
                 if path == "/api/items":
                     self._json(201, service.create_item(body, actor, role))
+                elif path == "/api/vehicles":
+                    self._json(201, service.register_vehicle(body, actor, role))
+                elif path == "/api/zones":
+                    self._json(201, service.register_zone(body, actor, role))
+                elif path.startswith("/api/zones/") and path.endswith("/environment"):
+                    zone_id = self._path_id(path, 3)
+                    self._json(200, service.update_environment(zone_id, body, actor, role))
+                elif path == "/api/tasks":
+                    self._json(201, service.submit_task(body, actor, role))
+                elif path.startswith("/api/tasks/") and path.endswith("/dispatches"):
+                    task_id = self._path_id(path, 3)
+                    self._json(201, service.request_vehicle(task_id, body, actor, role))
+                elif path.startswith("/api/tasks/") and path.endswith("/complete"):
+                    task_id = self._path_id(path, 3)
+                    self._json(200, service.complete_task(task_id, actor, role))
+                elif path.startswith("/api/dispatches/") and path.endswith("/complete"):
+                    dispatch_id = self._path_id(path, 3)
+                    self._json(200, service.complete_dispatch(dispatch_id, actor, role))
+                elif path.startswith("/api/dispatches/") and path.endswith("/cancel"):
+                    dispatch_id = self._path_id(path, 3)
+                    self._json(200, service.cancel_dispatch(dispatch_id, actor, role))
+                elif path == "/api/sync":
+                    self._json(200, {"results": service.sync_commands(
+                        body.get("commands", []), actor, role)})
                 elif path.startswith("/api/items/") and path.endswith("/records"):
                     item_id = int(path.split("/")[3])
                     self._json(201, service.add_record(item_id, body, actor, role))
