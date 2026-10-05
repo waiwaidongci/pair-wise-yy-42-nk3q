@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime, timezone
 from .domain import ConflictError, ValidationError
 TITLE='山火事件指挥与离线人员调度'; ENTITY='山火事件'; ID_PREFIX='WF'
 SEVERITIES=['low', 'moderate', 'high', 'extreme']; STATES=['reported', 'active', 'contained', 'controlled', 'closed']; TRANSITIONS={'reported': ['active'], 'active': ['contained'], 'contained': ['controlled'], 'controlled': ['closed'], 'closed': []}; TRANSITION_ROLES={'active': ['incident_commander'], 'contained': ['incident_commander'], 'controlled': ['incident_commander'], 'closed': ['incident_commander']}
@@ -20,3 +21,40 @@ def validate_transition(current,target):
     if not can_transition(current,target): raise ConflictError(f"不能从{current}转换到{target}")
 def completion_blockers(target,open_records): return ["仍有未关闭事项"] if target in TERMINAL_STATES and open_records>0 else []
 def role_for_transition(target): return set(TRANSITION_ROLES.get(target,[]))
+
+# 车辆调度：车辆、火线任务与任务区容量绑定
+DISPATCH_STATUSES=['waiting','dispatched','invalid']
+FIRE_TASK_STATUSES=['scheduled','active','done','cancelled']
+WIND_DIRECTIONS=['N','NE','E','SE','S','SW','W','NW']
+DISPATCH_ROLES=set(['field_commander','logistics','incident_commander'])
+VEHICLE_MANAGE_ROLES=set(['field_commander','logistics','incident_commander'])
+AREA_MANAGE_ROLES=set(['incident_commander','logistics'])
+TASK_MANAGE_ROLES=set(['field_commander','incident_commander'])
+TERMINAL_TASK_STATUSES=set(['done','cancelled'])
+
+def valid_dispatch_status(status): return status in DISPATCH_STATUSES
+def valid_fire_task_status(status): return status in FIRE_TASK_STATUSES
+def valid_wind_direction(value): return value in WIND_DIRECTIONS
+def is_terminal_task(status): return status in TERMINAL_TASK_STATUSES
+def can_reschedule(status): return not is_terminal_task(status)
+
+def validate_capacity(capacity):
+    if isinstance(capacity,bool) or not isinstance(capacity,int):
+        raise ValidationError("任务区容量必须是正整数")
+    if capacity<1: raise ValidationError("任务区容量必须大于0")
+    return capacity
+
+def _parse_ts(value):
+    if not isinstance(value,str): raise ValidationError("时段必须是ISO时间字符串")
+    try: dt=datetime.fromisoformat(value)
+    except ValueError as exc: raise ValidationError("时段格式不正确") from exc
+    if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+    return dt
+
+def validate_time_window(start_at,end_at):
+    start=_parse_ts(start_at); end=_parse_ts(end_at)
+    if start>=end: raise ValidationError("任务开始时间必须早于结束时间")
+    return start_at,end_at
+
+def windows_overlap(start1,end1,start2,end2):
+    return _parse_ts(start1)<_parse_ts(end2) and _parse_ts(start2)<_parse_ts(end1)

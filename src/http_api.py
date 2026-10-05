@@ -75,7 +75,19 @@ def make_handler(service: Service, static_dir: str):
 
         def do_GET(self) -> None:
             try:
-                path = urlparse(self.path).path
+                parsed = urlparse(self.path)
+                path = parsed.path
+                query = parse_qs(parsed.query)
+
+                def _int_query(name: str) -> Optional[int]:
+                    values = query.get(name)
+                    if not values:
+                        return None
+                    try:
+                        return int(values[0])
+                    except ValueError:
+                        raise ValidationError(f"{name}必须是整数")
+
                 if path == "/health":
                     self._json(200, {"status": "ok"})
                 elif path == "/":
@@ -98,6 +110,35 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path == "/api/vehicles":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"vehicles": service.list_vehicles(role)})
+                elif path == "/api/task-areas":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"areas": service.list_task_areas(role)})
+                elif path == "/api/fire-tasks":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"tasks": service.list_fire_tasks(
+                        role, _int_query("area_id"), _int_query("item_id"))})
+                elif path.startswith("/api/fire-tasks/"):
+                    task_id = int(path.rsplit("/", 1)[-1])
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, service.get_fire_task(task_id, role))
+                elif path == "/api/dispatches":
+                    actor, role = self._identity()
+                    del actor
+                    status = query.get("status", [None])[0]
+                    self._json(200, {"dispatches": service.list_dispatches(
+                        role, status, _int_query("area_id"),
+                        _int_query("task_id"), _int_query("vehicle_id"))})
+                elif path == "/api/dispatch-console":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, service.dispatch_console(role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -119,6 +160,24 @@ def make_handler(service: Service, static_dir: str):
                     expected = body.get("expected_version")
                     self._json(200, service.transition(
                         item_id, target, expected, actor, role))
+                elif path == "/api/vehicles":
+                    self._json(201, service.create_vehicle(body, actor, role))
+                elif path == "/api/task-areas":
+                    self._json(201, service.create_task_area(body, actor, role))
+                elif path == "/api/fire-tasks":
+                    self._json(201, service.create_fire_task(body, actor, role))
+                elif path.startswith("/api/fire-tasks/") and path.endswith("/dispatches"):
+                    task_id = int(path.split("/")[3])
+                    self._json(201, service.dispatch_vehicle(
+                        task_id, body.get("vehicle_id"), body.get("external_ref"),
+                        actor, role))
+                elif path.startswith("/api/fire-tasks/") and path.endswith("/reschedule"):
+                    task_id = int(path.split("/")[3])
+                    self._json(200, service.reschedule_task(task_id, actor, role))
+                elif path.startswith("/api/fire-tasks/") and path.endswith("/update"):
+                    task_id = int(path.split("/")[3])
+                    self._json(200, service.update_fire_task(
+                        task_id, body, body.get("expected_version"), actor, role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
